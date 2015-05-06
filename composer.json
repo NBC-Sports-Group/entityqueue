@@ -1,0 +1,6 @@
+{
+    "name": "drupal/entityqueue",
+    "description": "Allows users to collect entities in arbitrarily ordered lists.",
+    "type": "drupal-module",
+    "license": "GPL-2.0+",
+}
