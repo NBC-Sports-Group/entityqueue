@@ -1,0 +1,414 @@
+<?php
+
+/**
+ * @file
+ * Provides a Draggable Table Widget for Entity Reference Fields.
+ */
+
+ /**
+  * Implements hook_theme().
+  */
+ function entityqueue_dragtable_theme() {
+   return array(
+     'entityqueue_dragtable' => array(
+       'render element' => 'form',
+       'file' => 'includes/entityqueue.theme.inc',
+     ),
+   );
+ }
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function entityqueue_dragtable_field_widget_info() {
+  return array(
+    'entityqueue_dragtable' => array(
+      'label' => t('Draggable table'),
+      'field types' => array('entityreference'),
+      'settings' => array(
+        'match_operator' => 'CONTAINS',
+        'size' => 60,
+      ),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_settings_form().
+ */
+function entityqueue_dragtable_field_widget_settings_form($field, $instance) {
+  $widget = $instance['widget'];
+  $settings = $widget['settings'] + field_info_widget_settings($widget['type']);
+
+  $form = array();
+
+  if ($widget['type'] == 'entityqueue_dragtable') {
+    $target_type = $field['settings']['target_type'];
+    $info = entity_get_info($target_type);
+    $target_label = isset($info['plural label']) ? $info['plural label'] : $info['label'];
+    $form['match_operator'] = array(
+      '#type' => 'select',
+      '#title' => t('Autocomplete matching'),
+      '#default_value' => $settings['match_operator'],
+      '#options' => array(
+        'STARTS_WITH' => t('Starts with'),
+        'CONTAINS' => t('Contains'),
+      ),
+      '#description' => t('Select the method used to collect autocomplete suggestions. Note that <em>Contains</em> can cause performance issues on sites with thousands of @entities.', array(
+        '@entities' => $target_label,
+      )),
+    );
+    $form['size'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Size of textfield'),
+      '#default_value' => $settings['size'],
+      '#element_validate' => array('_element_validate_integer_positive'),
+      '#required' => TRUE,
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function entityqueue_dragtable_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  if ($instance['widget']['type'] == 'entityqueue_dragtable') {
+    $entity_type = $element['#entity_type'];
+    $field_name = $element['#field_name'];
+    $target_type = $field['settings']['target_type']; // The referenced entity_type
+    $entity = isset($element['#entity']) ? $element['#entity'] : FALSE;
+    // Abort early if we don't have a reference to the parent entity.
+    if (!$entity) {
+      return $element;
+    }
+
+    list($entity_id) = entity_extract_ids($entity_type, $entity);
+    $value_key = key($field['columns']);
+    $element['#value_key'] = $value_key;
+
+    $parents = array();
+    if (!empty($element['#field_parents'])) {
+      $parents = $element['#field_parents'];
+    }
+    $parents[] = $field_name;
+    $parents[] = $langcode;
+
+    $field_id = 'entityqueue-dragtable-' . implode('-', $parents);
+    $field_id = drupal_clean_css_identifier($field_id);
+    $element['wrapper'] = array(
+      '#type' => 'container',
+      '#attributes' => array(
+        'id' => $field_id,
+      ),
+    );
+
+    // We don't use drupal_html_id() here because Drupal will generate a new one
+    // everytime the form is rebuilt.
+    $table_id = 'entityqueue-dragtable-' . implode('-', $parents) . '-table';
+    $table_id = drupal_clean_css_identifier($table_id);
+    $table_classes = array(
+      'entityqueue-dragtable',
+      'entityqueue-dragtable-field-' . $field_name,
+      'entityqueue-dragtable-entity-type-' . $entity_type,
+    );
+    drupal_add_tabledrag($table_id, 'order', 'sibling', 'item-weight');
+    $element['wrapper']['items'] = array(
+      '#theme' => 'entityqueue_dragtable',
+      '#attributes' => array(
+        'id' => $table_id,
+        'class' => $table_classes,
+      ),
+      '#attached' => array(
+        'js' => array(
+          drupal_get_path('module', 'entityqueue_dragtable') . '/js/entityqueue.widget.js' => array('type' => 'file'),
+        ),
+        'css' => array(
+          drupal_get_path('module', 'entityqueue') . '/css/entityqueue.admin.css' => array('type' => 'file'),
+        ),
+      ),
+    );
+
+    $rows = array();
+    $values = $items;
+
+    if (!empty($form_state['values'])) {
+      if (!empty($element['#parents'])) {
+        $values = drupal_array_get_nested_value($element['#parents'], $form_state['values']);
+      }
+      elseif (isset($form_state['values'][$field_name][$langcode])) {
+        $values = $form_state['values'][$field_name][$langcode];
+      }
+    }
+
+    $entities = array();
+    if (!empty($values)) {
+      $entity_ids = array();
+      foreach ($values as $key => $item) {
+        $entity_ids[] = $item[$value_key];
+      }
+      $entities = entity_load($target_type, $entity_ids);
+    }
+    $count = count($values);
+
+    // When ajax element is clicked, don't lose the destination.
+    if (current_path() == 'system/ajax') {
+      if (isset($form_state['destination'])) {
+        $destination = $form_state['destination'];
+      }
+    }
+    else  {
+      $destination = drupal_get_destination();
+      $form_state['destination'] = $destination;
+    }
+
+    $weight = 0; // Keeps track of existing items index
+    foreach ($values as $key => $item) {
+      $target_id = $item[$value_key];
+      $actions = array();
+
+      if (!isset($entities[$target_id])) {
+        // Skip entities that no longer exist.
+        continue;
+      }
+
+      if (entity_access('view', $target_type, $entities[$target_id])) {
+        $label = entity_label($target_type, $entities[$target_id]);
+        $uri = entity_uri($target_type, $entities[$target_id]);
+        $label = l($label, $uri['path']);
+
+        $published = TRUE;
+        $types = array(
+          'node',
+          'comment',
+          'user',
+        );
+        if (in_array($target_type, $types)) {
+          if ($entities[$target_id]->status == 0) {
+            $published = FALSE;
+          }
+        }
+        elseif ($target_type == 'file') {
+          if (isset($entities[$target_id]->published)) {
+            if ($entities[$target_id]->published == 0) {
+              $published = FALSE;
+            }
+          }
+        }
+
+        if (!$published) {
+          if ($target_type == 'user') {
+            $status = t('Blocked');
+          }
+          else {
+            $status = t('Unpublished');
+          }
+
+          $label .= ' <span class="unpublished">(' . $status . ')<span>';
+        }
+      }
+      else {
+        $label = t('- Restricted access -');
+      }
+
+      $remove_parents = $parents;
+      $remove_parents[] = 'items';
+      $remove_parents[] = $weight;
+      $remove_parents[] = 'actions';
+      $remove_parents[] = 0;
+
+      $element['wrapper']['items'][$weight] = array(
+        'label' => array(
+          '#type' => 'markup',
+          '#markup' => $label,
+        ),
+        $value_key => array(
+          '#type' => 'value',
+          '#value' => $target_id,
+        ),
+        'actions' => array(
+          '#type' => 'container',
+          array(
+            '#type' => 'button',
+            '#value' => t('Remove'),
+            '#name' => implode('_', $remove_parents),
+            '#validate' => array(),
+            '#ajax' => array(
+              'callback' => 'entityqueue_field_widget_ajax_callback',
+              'wrapper' => $field_id,
+            ),
+          ),
+        ),
+        'weight' => array(
+          '#type' => 'weight',
+          '#delta' => $count,
+          '#default_value' => $weight,
+          '#title' => '',
+          '#attributes' => array('class' => array('item-weight')),
+        ),
+      );
+
+      $weight++;
+    }
+    // This is stolen from entityreference_field_widget_form() and trimmed down
+    // for our purposes.
+    $autocomplete_path = 'entityreference/autocomplete/single/';
+    $autocomplete_path .= $field_name . '/' . $entity_type . '/' . $instance['bundle'] . '/';
+    $id = 'NULL';
+    if ($entity_id) {
+      $id = $entity_id;
+    }
+    $autocomplete_path .= $id;
+
+    $add_parents = $parents;
+    $add_parents[] = 'add';
+    $add_parents[] = 'submit';
+
+    $access = TRUE;
+    if ($field['cardinality'] != FIELD_CARDINALITY_UNLIMITED) {
+      if (count($entities) >= $field['cardinality']) {
+        $access = FALSE;
+      }
+    }
+
+    $element['wrapper']['add'] = array(
+      '#type' => 'container',
+      '#attributes' => array('class' => array('container-inline')),
+      '#weight' => 10,
+      '#access' => $access,
+      'entity' => array(
+        '#type' => 'textfield',
+        '#maxlength' => 1024,
+        '#default_value' => '',
+        '#autocomplete_path' => $autocomplete_path,
+        '#size' => $instance['widget']['settings']['size'],
+        '#element_validate' => array('_entityreference_autocomplete_validate'),
+        '#attributes' => array(
+          'id' => $table_id . '-add',
+        ),
+      ),
+      'submit' => array(
+        '#type' => 'button',
+        '#value' => t('Add item'),
+        '#name' => implode('_', $add_parents),
+        '#ajax' => array(
+          'callback' => 'entityqueue_field_widget_ajax_callback',
+          'wrapper' => $field_id,
+        ),
+      ),
+    );
+
+    if (!empty($instance['description'])) {
+      $element['wrapper']['description'] = array(
+        '#markup' => field_filter_xss($instance['description']),
+        '#prefix' => '<div class="description">',
+        '#suffix' => '</div>',
+        '#weight' => 11,
+      );
+    }
+
+    $element['#element_validate'] = array('entityqueue_widget_dragtable_element_validate');
+    return $element;
+  }
+}
+
+/**
+ * Element validate callback.
+ * @see entityqueue_dragtable_field_widget_form()
+ */
+function entityqueue_dragtable_widget_dragtable_element_validate($element, &$form_state) {
+  entityqueue_dragtable_field_widget_set_values($element, $form_state);
+}
+
+/**
+ * Set Draggable Tabble Values.
+ *
+ * @see entityqueue_widget_dragtable_element_validate()
+ */
+function entityqueue_dragtable_field_widget_set_values($element, &$form_state, $existing_values = FALSE) {
+  $items = array();
+  $value_key = $element['#value_key'];
+  $field_name = $element['#field_name'];
+  $lang = $element['#language'];
+  $field_values = array();
+  $existing_values = array();
+
+  if (!empty($element['#parents'])) {
+    $field_values = drupal_array_get_nested_value($form_state['values'], $element['#parents']);
+  }
+  elseif (isset($form_state['values'][$field_name][$lang]['wrapper'])) {
+    $field_values = $form_state['values'][$field_name][$lang];
+  }
+
+  if (!empty($field_values['wrapper']['items'])) {
+    $existing_values = $field_values['wrapper']['items'];
+  }
+
+  // If the trigger was a remove button.
+  if (!empty($form_state['triggering_element'])) {
+    $trigger_parents = $form_state['triggering_element']['#parents'];
+    $field_parents = array_slice($trigger_parents, 0, -5);
+
+    // Ensure that we are modifying the same element.
+    $diff = array_diff($field_parents, $element['#parents']);
+    if (empty($diff)) {
+      $value_parents = array_slice($trigger_parents, 0, -2);
+      $trigger_values = drupal_array_get_nested_value($form_state['values'], $value_parents);
+      if (isset($trigger_values['weight'])) {
+        $remove_key = $trigger_values['weight'];
+        unset($existing_values[$remove_key]);
+      }
+    }
+  }
+
+  $values = array();
+  $weights = array();
+  foreach ($existing_values as $key => $row) {
+    $values[] = $row[$value_key];
+    $weights[] = $row['weight'];
+  }
+  array_multisort($weights, SORT_ASC, $existing_values);
+  foreach ($existing_values as $key => $row) {
+    $items[] = array(
+      $value_key => $row[$value_key],
+    );
+  }
+  $new_value = $field_values['wrapper']['add'];
+  if (!empty($new_value['entity'])) {
+    $items[] = array(
+      $value_key => $new_value['entity'],
+    );
+  }
+
+  form_set_value($element, $items, $form_state);
+}
+
+/**
+ * Ajax form callback.
+ */
+function entityqueue_dragtable_field_widget_ajax_callback($form, $form_state) {
+  $parents = $form_state['triggering_element']['#parents'];
+  $field_name = '';
+  $element = array();
+  while (count($parents) && !$field_name) {
+    $element = drupal_array_get_nested_value($form, $parents);
+    $field_name = isset($element['#field_name']) ? $element['#field_name'] : '';
+    array_pop($parents);
+  }
+  $lang = $element['#language'];
+  $form_state['rebuild'] = TRUE;
+  $element['wrapper']['add']['entity']['#value'] = '';
+
+  entityqueue_field_widget_set_values($element, $form_state);
+
+  $table_id = $element['wrapper']['items']['#attributes']['id'];
+  $settings = array(
+    $table_id => TRUE,
+  );
+  drupal_add_js(array('entityqueue_changed' => $settings), 'setting');
+  return $element;
+}
