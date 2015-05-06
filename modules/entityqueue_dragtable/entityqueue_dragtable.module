@@ -238,7 +238,7 @@ function entityqueue_dragtable_field_widget_form(&$form, &$form_state, $field, $
             '#name' => implode('_', $remove_parents),
             '#validate' => array(),
             '#ajax' => array(
-              'callback' => 'entityqueue_field_widget_ajax_callback',
+              'callback' => 'entityqueue_dragtable_field_widget_ajax_callback',
               'wrapper' => $field_id,
             ),
           ),
@@ -296,7 +296,7 @@ function entityqueue_dragtable_field_widget_form(&$form, &$form_state, $field, $
         '#value' => t('Add item'),
         '#name' => implode('_', $add_parents),
         '#ajax' => array(
-          'callback' => 'entityqueue_field_widget_ajax_callback',
+          'callback' => 'entityqueue_dragtable_field_widget_ajax_callback',
           'wrapper' => $field_id,
         ),
       ),
