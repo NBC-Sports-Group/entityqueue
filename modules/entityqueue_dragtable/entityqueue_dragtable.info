@@ -1,0 +1,8 @@
+name = Draggable Table
+description = Provides a Draggable Table Widget for Entity Reference Fields.
+package = Entityqueue
+core = 7.x
+
+dependencies[] = system (>7.11)
+dependencies[] = entity
+dependencies[] = entityreference

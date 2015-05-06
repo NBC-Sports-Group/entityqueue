@@ -8,6 +8,7 @@ dependencies[] = system (>7.11)
 dependencies[] = ctools
 dependencies[] = entity
 dependencies[] = entityreference
+dependencies[] = entityqueue_dragtable
 
 ; EntityQueue and EntitySubqueue classes.
 files[] = includes/entityqueue_queue.class.inc
