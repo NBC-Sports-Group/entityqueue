@@ -936,6 +936,9 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
         'js' => array(
           drupal_get_path('module', 'entityqueue') . '/js/entityqueue.widget.js' => array('type' => 'file'),
         ),
+        'css' => array(
+          drupal_get_path('module', 'entityqueue') . '/css/entityqueue.admin.css' => array('type' => 'file'),
+        ),
       ),
     );
 
@@ -975,6 +978,36 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
         $label = entity_label($target_type, $entities[$target_id]);
         $uri = entity_uri($target_type, $entities[$target_id]);
         $label = l($label, $uri['path']);
+
+        $published = TRUE;
+        $types = array(
+          'node',
+          'comment',
+          'user',
+        );
+        if (in_array($target_type, $types)) {
+          if ($entities[$target_id]->status == 0) {
+            $published = FALSE;
+          }
+        }
+        elseif ($target_type == 'file') {
+          if (isset($entities[$target_id]->published)) {
+            if ($entities[$target_id]->published == 0) {
+              $published = FALSE;
+            }
+          }
+        }
+
+        if (!$published) {
+          if ($target_type == 'user') {
+            $status = t('Blocked');
+          }
+          else {
+            $status = t('Unpublished');
+          }
+
+          $label .= ' <span class="unpublished">(' . $status . ')<span>';
+        }
       }
       else {
         $label = t('- Restricted access -');

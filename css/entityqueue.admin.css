@@ -16,3 +16,7 @@
 #entityqueue-overview-form td.operations .ctools-dropbutton {
   position: absolute;
 }
+
+.entityqueue-dragtable .unpublished {
+  color: #ff0000;
+}
