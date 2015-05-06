@@ -903,7 +903,6 @@ function entityqueue_field_widget_settings_form($field, $instance) {
  */
 function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
   if ($instance['widget']['type'] == 'entityqueue_dragtable') {
-    $subform = array();
     $entity_type = $element['#entity_type'];
     $field_name = $element['#field_name'];
     $target_type = $field['settings']['target_type']; // The referenced entity_type
@@ -915,18 +914,35 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
 
     list($entity_id) = entity_extract_ids($entity_type, $entity);
     $value_key = key($field['columns']);
-    $subform['#value_key'] = $value_key;
-    // We don't use drupal_html_id() here because our ajax callback needs
-    // to be able to know what the table id is. We should never have
-    // the same form field multiple times on a page anyway.
-    $table_id = drupal_clean_css_identifier('entityqueue-dragtable-' . $field_name);
+    $element['#value_key'] = $value_key;
+
+    $parents = array();
+    if (!empty($element['#field_parents'])) {
+      $parents = $element['#field_parents'];
+    }
+    $parents[] = $field_name;
+    $parents[] = $langcode;
+
+    $field_id = 'entityqueue-dragtable-' . implode('-', $parents);
+    $field_id = drupal_clean_css_identifier($field_id);
+    $element['wrapper'] = array(
+      '#type' => 'container',
+      '#attributes' => array(
+        'id' => $field_id,
+      ),
+    );
+
+    // We don't use drupal_html_id() here because Drupal will generate a new one
+    // everytime the form is rebuilt.
+    $table_id = 'entityqueue-dragtable-' . implode('-', $parents) . '-table';
+    $table_id = drupal_clean_css_identifier($table_id);
     $table_classes = array(
       'entityqueue-dragtable',
       'entityqueue-dragtable-field-' . $field_name,
       'entityqueue-dragtable-entity-type-' . $entity_type,
     );
     drupal_add_tabledrag($table_id, 'order', 'sibling', 'item-weight');
-    $subform['items'] = array(
+    $element['wrapper']['items'] = array(
       '#theme' => 'entityqueue_dragtable',
       '#attributes' => array(
         'id' => $table_id,
@@ -943,7 +959,18 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
     );
 
     $rows = array();
-    $values = isset($form_state['values'][$field_name][$langcode]) ? $form_state['values'][$field_name][$langcode] : $items;
+    $values = $items;
+
+    if (!empty($form_state['values'])) {
+      if (!empty($element['#parents'])) {
+        $values = drupal_array_get_nested_value($element['#parents'], $form_state['values']);
+      }
+      elseif (isset($form_state['values'][$field_name][$langcode])) {
+        $values = $form_state['values'][$field_name][$langcode];
+      }
+    }
+
+    $entities = array();
     if (!empty($values)) {
       $entity_ids = array();
       foreach ($values as $key => $item) {
@@ -1013,18 +1040,13 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
         $label = t('- Restricted access -');
       }
 
-      $actions[] = array(
-        '#type' => 'button',
-        '#value' => t('Remove'),
-        '#name' => $field_name . '_remove_' . $weight,
-        '#validate' => array(),
-        '#ajax' => array(
-          'callback' => 'entityqueue_field_widget_ajax_callback',
-          'wrapper' => $table_id,
-        ),
-      );
+      $remove_parents = $parents;
+      $remove_parents[] = 'items';
+      $remove_parents[] = $weight;
+      $remove_parents[] = 'actions';
+      $remove_parents[] = 0;
 
-      $subform['items'][$weight] = array(
+      $element['wrapper']['items'][$weight] = array(
         'label' => array(
           '#type' => 'markup',
           '#markup' => $label,
@@ -1035,7 +1057,16 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
         ),
         'actions' => array(
           '#type' => 'container',
-          $actions,
+          array(
+            '#type' => 'button',
+            '#value' => t('Remove'),
+            '#name' => implode('_', $remove_parents),
+            '#validate' => array(),
+            '#ajax' => array(
+              'callback' => 'entityqueue_field_widget_ajax_callback',
+              'wrapper' => $field_id,
+            ),
+          ),
         ),
         'weight' => array(
           '#type' => 'weight',
@@ -1057,10 +1088,23 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
       $id = $entity_id;
     }
     $autocomplete_path .= $id;
-    $subform['add'] = array(
+
+    $add_parents = $parents;
+    $add_parents[] = 'add';
+    $add_parents[] = 'submit';
+
+    $access = TRUE;
+    if ($field['cardinality'] != FIELD_CARDINALITY_UNLIMITED) {
+      if (count($entities) >= $field['cardinality']) {
+        $access = FALSE;
+      }
+    }
+
+    $element['wrapper']['add'] = array(
       '#type' => 'container',
       '#attributes' => array('class' => array('container-inline')),
       '#weight' => 10,
+      '#access' => $access,
       'entity' => array(
         '#type' => 'textfield',
         '#maxlength' => 1024,
@@ -1073,17 +1117,18 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
         ),
       ),
       'submit' => array(
-        '#type' => 'submit',
+        '#type' => 'button',
         '#value' => t('Add item'),
+        '#name' => implode('_', $add_parents),
         '#ajax' => array(
           'callback' => 'entityqueue_field_widget_ajax_callback',
-          'wrapper' => $table_id,
+          'wrapper' => $field_id,
         ),
       ),
     );
 
     if (!empty($instance['description'])) {
-      $subform['description'] = array(
+      $element['wrapper']['description'] = array(
         '#markup' => field_filter_xss($instance['description']),
         '#prefix' => '<div class="description">',
         '#suffix' => '</div>',
@@ -1091,8 +1136,8 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
       );
     }
 
-    $subform['#element_validate'] = array('entityqueue_widget_dragtable_element_validate');
-    return $subform;
+    $element['#element_validate'] = array('entityqueue_widget_dragtable_element_validate');
+    return $element;
   }
 }
 
@@ -1101,23 +1146,50 @@ function entityqueue_field_widget_form(&$form, &$form_state, $field, $instance, 
  * @see entityqueue_field_widget_form()
  */
 function entityqueue_widget_dragtable_element_validate($element, &$form_state) {
+  entityqueue_field_widget_set_values($element, $form_state);
+}
+
+/**
+ * Set Draggable Tabble Values.
+ *
+ * @see entityqueue_widget_dragtable_element_validate()
+ */
+function entityqueue_field_widget_set_values($element, &$form_state, $existing_values = FALSE) {
   $items = array();
   $value_key = $element['#value_key'];
   $field_name = $element['#field_name'];
   $lang = $element['#language'];
-  if (isset($form_state['values'][$field_name][$lang]['items'])) {
-    $existing_values = $form_state['values'][$field_name][$lang]['items'];
+  $field_values = array();
+  $existing_values = array();
+
+  if (!empty($element['#parents'])) {
+    $field_values = drupal_array_get_nested_value($form_state['values'], $element['#parents']);
   }
-  else {
-    $existing_values = array();
+  elseif (isset($form_state['values'][$field_name][$lang]['wrapper'])) {
+    $field_values = $form_state['values'][$field_name][$lang];
   }
+
+  if (!empty($field_values['wrapper']['items'])) {
+    $existing_values = $field_values['wrapper']['items'];
+  }
+
   // If the trigger was a remove button.
-  $triggering_element = $form_state['triggering_element'];
-  $offset = drupal_strlen($field_name) + 8;
-  if (drupal_substr($triggering_element['#name'], 0, $offset) == $field_name . '_remove_') {
-    $remove_key = drupal_substr($triggering_element['#name'], $offset);
-    unset($existing_values[$remove_key]);
+  if (!empty($form_state['triggering_element'])) {
+    $trigger_parents = $form_state['triggering_element']['#parents'];
+    $field_parents = array_slice($trigger_parents, 0, -5);
+
+    // Ensure that we are modifying the same element.
+    $diff = array_diff($field_parents, $element['#parents']);
+    if (empty($diff)) {
+      $value_parents = array_slice($trigger_parents, 0, -2);
+      $trigger_values = drupal_array_get_nested_value($form_state['values'], $value_parents);
+      if (isset($trigger_values['weight'])) {
+        $remove_key = $trigger_values['weight'];
+        unset($existing_values[$remove_key]);
+      }
+    }
   }
+
   $values = array();
   $weights = array();
   foreach ($existing_values as $key => $row) {
@@ -1130,42 +1202,40 @@ function entityqueue_widget_dragtable_element_validate($element, &$form_state) {
       $value_key => $row[$value_key],
     );
   }
-  $new_value = $form_state['values'][$field_name][$lang]['add'];
+  $new_value = $field_values['wrapper']['add'];
   if (!empty($new_value['entity'])) {
     $items[] = array(
       $value_key => $new_value['entity'],
     );
   }
+
   form_set_value($element, $items, $form_state);
-  // Rebuild form if ajax callback button was clicked.
-  if (current_path() == 'system/ajax') {
-    $form_state['rebuild'] = TRUE;
-  }
 }
 
 /**
  * Ajax form callback.
  */
 function entityqueue_field_widget_ajax_callback($form, $form_state) {
-  $field_name = $form_state['triggering_element']['#parents'][0];
-  $lang = $form[$field_name]['#language'];
+  $parents = $form_state['triggering_element']['#parents'];
+  $field_name = '';
+  $element = array();
+  while (count($parents) && !$field_name) {
+    $element = drupal_array_get_nested_value($form, $parents);
+    $field_name = isset($element['#field_name']) ? $element['#field_name'] : '';
+    array_pop($parents);
+  }
+  $lang = $element['#language'];
   $form_state['rebuild'] = TRUE;
-  $form[$field_name][$lang]['add']['#value'] = '';
-  $markup = drupal_render($form[$field_name]);
+  $element['wrapper']['add']['entity']['#value'] = '';
 
-  $commands[] = ajax_command_replace('.' . drupal_clean_css_identifier('field-name-' . $field_name) , $markup);
+  entityqueue_field_widget_set_values($element, $form_state);
 
-
-  $add_id = drupal_clean_css_identifier('entityqueue-dragtable-' . $field_name . '-add');
-  $commands[] = ajax_command_invoke('#' . $add_id, 'val', array(''));
+  $table_id = $element['wrapper']['items']['#attributes']['id'];
   $settings = array(
-    drupal_clean_css_identifier('entityqueue-dragtable-' . $field_name) => true,
+    $table_id => TRUE,
   );
   drupal_add_js(array('entityqueue_changed' => $settings), 'setting');
-  return array(
-    '#type' => 'ajax',
-    '#commands' => $commands,
-  );
+  return $element;
 }
 
 /**
