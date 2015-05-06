@@ -403,7 +403,7 @@ function entityqueue_dragtable_field_widget_ajax_callback($form, $form_state) {
   $form_state['rebuild'] = TRUE;
   $element['wrapper']['add']['entity']['#value'] = '';
 
-  entityqueue_field_widget_set_values($element, $form_state);
+  entityqueue_dragtable_field_widget_set_values($element, $form_state);
 
   $table_id = $element['wrapper']['items']['#attributes']['id'];
   $settings = array(
