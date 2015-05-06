@@ -311,7 +311,7 @@ function entityqueue_dragtable_field_widget_form(&$form, &$form_state, $field, $
       );
     }
 
-    $element['#element_validate'] = array('entityqueue_widget_dragtable_element_validate');
+    $element['#element_validate'] = array('entityqueue_dragtable_widget_dragtable_element_validate');
     return $element;
   }
 }
@@ -327,7 +327,7 @@ function entityqueue_dragtable_widget_dragtable_element_validate($element, &$for
 /**
  * Set Draggable Tabble Values.
  *
- * @see entityqueue_widget_dragtable_element_validate()
+ * @see entityqueue_dragtable_widget_dragtable_element_validate()
  */
 function entityqueue_dragtable_field_widget_set_values($element, &$form_state, $existing_values = FALSE) {
   $items = array();
